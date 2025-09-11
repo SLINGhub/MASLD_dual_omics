@@ -620,7 +620,7 @@ table(met_data2$note)
 
 For the same compound with multiple adducts:
 
--   For each tissue, sum up (hypergeometric mean) intensity if the entry has CoV \< 30 & detection frequency \> 30
+-   For each tissue, sum up (geometric mean) intensity if the entry has CoV \< 30 & detection frequency \> 30
 
 ```{r}
 
