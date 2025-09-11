@@ -1,0 +1,128 @@
+---
+title: "MASLD stats"
+output: html_document
+date: "2025-09-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Code to replicate the main statistical results
+
+-   Load data
+
+```{r}
+library(beeswarm)
+library(dplyr)
+
+### Load clinical data
+load("../Data/Patient_data.RData")
+sdata = metadata
+
+### Histological features for linear regression: 0,1,2,3 only
+sdata$`Liver histology_Fibrosis` = as.numeric(gsub("[a-z]","", sdata$`Liver histology_Fibrosis`))
+
+### combine level 2 and 3 for steatosis and fibrosis for boxplot
+sdata$Steatosis= sapply(sdata$`Liver histology_Steatosis`, 
+                        function(x)ifelse(x == "2"| x == "3", "2,3", x))
+sdata$Fibrosis = sapply(sdata$`Liver histology_Fibrosis`, 
+                        function(x)ifelse(x == "2"| x == "3", "2,3", x)) 
+sdata$Steatosis = factor(sdata$Steatosis, levels = c("0", "1", "2,3"))
+sdata$Fibrosis = factor(sdata$Fibrosis, levels = c("0", "1", "2,3"))
+sdata$`MASLD diagnosis` = factor(sdata$`MASLD diagnosis`, levels = c("No Pathology", "MASLD"))
+
+
+### Load log2-transformed data
+load("../Data/liver_transcriptomics_data.RData")
+d = liver.rna.data
+
+# Match sample IDs
+gene = d[,c(1:4)]
+data = d[,-c(1:4)]
+m = match(colnames(data), sdata$`Secondary ID`)
+sdata = sdata[m, ]
+all(colnames(data) == sdata$`Secondary ID`) # T
+```
+
+-   Linear regression model adjusted for age, sex, BMI, and diabetes
+
+```{r}
+ngene = nrow(gene)
+
+coefMat = matrix(NA, ngene, 5)
+pvalMat = matrix(NA, ngene, 5)
+qvalMat = matrix(NA, ngene, 5)
+
+p = c("Liver histology_Steatosis", "Liver histology_Inflammation", "Liver histology_Ballooning", 
+      "Liver histology_Fibrosis", "Liver histology_NAS")
+
+colnames(coefMat) = paste0("coef_", p)
+colnames(pvalMat) = paste0("pval_", p)
+
+for (i in 1:ngene){
+  if(i %% 1000 == 0) print(i)
+  
+  g = as.numeric(data[i,])
+  g = scale(g)
+  df = cbind(g, sdata)
+  
+  for(j in 1:length(p)){
+    
+    # adjust for clinical variables
+    tmp.fit = lm(g ~ as.numeric(df[,p[j]]) + Age + `Sex (0=female, 1=male)` + BMI + `Diabetes (0=No, 1=Yes)`, df)
+    s = summary(tmp.fit)
+    
+    coefMat[i,j] = s$coefficients[2, 1]
+    pvalMat[i,j] = s$coefficients[2, 4]
+  }
+  df = NULL
+}
+
+# calculate q value
+qvalMat = apply(pvalMat, 2, function(x)qvalue(x)$qvalues)
+colnames(qvalMat) = paste0("qval_", p)
+
+mat = data.frame(matrix(NA, ngene, ncol(coefMat)*3))
+rownames(mat) = make.unique(gene$`HGNC symbol`)
+
+for (i in 1:ncol(coefMat)) {
+  mat[, (3*i - 2)] = coefMat[, i]
+  mat[, (3*i - 1)] = pvalMat[, i]
+  mat[, (3*i)] = qvalMat[, i]
+  colnames(mat)[3*i - 2] = colnames(coefMat)[i]
+  colnames(mat)[3*i - 1] = colnames(pvalMat)[i]
+  colnames(mat)[3*i] = colnames(qvalMat)[i]
+}
+
+tab = cbind(gene, mat)
+```
+
+-   Boxplots
+
+```{r}
+# Example: CDC42 gene - Fibrosis progression
+name = "CDC42"
+var = sdata[["Fibrosis"]]
+label = "Fibrosis grades"
+  
+  
+g = as.numeric(data[gene$`HGNC symbol` == name, ])
+df = data.frame(g, var)
+
+png("CDC42.png", width = 5, height = 5, units = "in", res = 3000)
+boxplot(g ~ var, data = df,
+        col = "white",
+        border = "gray40",
+        ylab = "log2 TPM",
+        xlab = label,
+        main = name)
+beeswarm(g ~ var, data = df,
+         add = TRUE,
+         pch = 19,
+         col = "darkblue",
+         method = "swarm")
+dev.off()
+```
+
+## 
